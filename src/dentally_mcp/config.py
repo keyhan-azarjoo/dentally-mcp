@@ -72,6 +72,42 @@ PUBLIC_URL = os.environ.get("DENTALLY_MCP_PUBLIC_URL", f"http://localhost:{PORT}
 # transport's auth gate, which is only ever acceptable on a loopback bind.
 CLIENT_AUTH_TOKEN = os.environ.get("DENTALLY_MCP_AUTH_TOKEN", "").strip()
 
+
+def _allowed_hosts() -> list[str]:
+    """Host header allow-list for DNS-rebinding protection.
+
+    FastMCP only switches this on by itself when bound to loopback. Behind a reverse
+    proxy — which is every real deployment — it binds 0.0.0.0 and the protection
+    silently does not apply. So we build the list ourselves from the public URL.
+
+    Both the bare host and a `:*` port wildcard are included: a proxy may or may not
+    pass the port through in the Host header, and getting that wrong rejects every
+    request with an opaque 400.
+    """
+    explicit = os.environ.get("DENTALLY_MCP_ALLOWED_HOSTS", "").strip()
+    if explicit:
+        raw = [h.strip() for h in explicit.replace(",", " ").split() if h.strip()]
+    else:
+        from urllib.parse import urlparse
+
+        host = urlparse(PUBLIC_URL).hostname or "localhost"
+        raw = [host, "localhost", "127.0.0.1"]
+    out: list[str] = []
+    for host in raw:
+        out.append(host)
+        if ":*" not in host:
+            out.append(f"{host}:*")
+    return out
+
+
+ALLOWED_HOSTS = _allowed_hosts()
+# Browsers send Origin; native clients (Claude Desktop, an OpenAI backend call) do not,
+# and an absent Origin is treated as same-origin and allowed.
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get("DENTALLY_MCP_ALLOWED_ORIGINS", PUBLIC_URL).replace(",", " ").split()
+    if o.strip()
+]
+
 # --- Safety ------------------------------------------------------------------
 # Writes (book/cancel/register/edit) are OFF by default. A read-only assistant that
 # gets a prompt-injected instruction can leak; one with writes can double-book a

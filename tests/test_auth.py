@@ -198,3 +198,35 @@ async def test_keepalive_reports_reauth_without_deleting_the_record(monkeypatch,
 
     assert "reauth-required" in results["p1"]
     assert store.get("p1") is not None
+
+
+# --- DNS rebinding protection ------------------------------------------------
+def test_allowed_hosts_are_derived_from_the_public_url(monkeypatch):
+    """FastMCP only turns this on for a loopback bind, so behind a proxy we must
+    supply the list ourselves or the protection silently does not apply."""
+    monkeypatch.setenv("DENTALLY_MCP_PUBLIC_URL", "https://dentally.example.com")
+    monkeypatch.delenv("DENTALLY_MCP_ALLOWED_HOSTS", raising=False)
+    monkeypatch.setattr(config, "PUBLIC_URL", "https://dentally.example.com")
+
+    hosts = config._allowed_hosts()
+    assert "dentally.example.com" in hosts
+    # The proxy may or may not pass the port through; missing the wildcard rejects
+    # every request with an opaque 400.
+    assert "dentally.example.com:*" in hosts
+
+
+def test_allowed_hosts_can_be_set_explicitly(monkeypatch):
+    monkeypatch.setenv("DENTALLY_MCP_ALLOWED_HOSTS", "a.example.com, b.example.com")
+    hosts = config._allowed_hosts()
+    assert "a.example.com" in hosts and "b.example.com" in hosts
+    assert "a.example.com:*" in hosts
+
+
+def test_the_built_server_carries_the_host_allow_list(monkeypatch):
+    from dentally_mcp.server import build
+
+    monkeypatch.setattr(config, "ALLOWED_HOSTS", ["dentally.example.com", "dentally.example.com:*"])
+    settings = build().settings.transport_security
+    assert settings is not None, "protection must not be left to FastMCP's loopback-only default"
+    assert settings.enable_dns_rebinding_protection is True
+    assert "dentally.example.com" in settings.allowed_hosts
