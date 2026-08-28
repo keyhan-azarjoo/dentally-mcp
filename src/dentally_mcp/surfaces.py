@@ -19,7 +19,7 @@ SURFACES: dict[str, set[str]] = {
         "list_appointments", "find_appointment_slots", "list_practitioners",
         "list_sites", "list_appointment_reasons", "list_cancellation_reasons",
         "book_appointment", "reschedule_appointment", "cancel_appointment",
-        "register_patient",
+        "register_patient", "update_patient",
     },
     # Chairside: who is coming, what was planned, what it costs.
     "clinician": {

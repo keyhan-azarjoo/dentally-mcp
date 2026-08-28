@@ -1,0 +1,17 @@
+# PINNED to the 1.x line on purpose: mcp 2.0.0 moved/removed `mcp.server.fastmcp`,
+# so an open upper bound means the next rebuild of the image starts a container that
+# crashes on import. Widen deliberately, with the FastMCP import path re-checked.
+mcp>=1.28,<2
+httpx>=0.27
+starlette>=0.37
+uvicorn>=0.30
+# Practice tokens are bearer credentials for an entire patient database; they are
+# Fernet-encrypted at rest rather than left as plaintext JSON.
+cryptography>=42
+# Optional error reporting. Inert unless SENTRY_DSN is set.
+sentry-sdk[starlette]>=2.0,<3
+
+# --- test deps ---
+pytest>=7
+pytest-asyncio>=0.21
+respx>=0.20
