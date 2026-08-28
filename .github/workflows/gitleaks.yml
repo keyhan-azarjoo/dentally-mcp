@@ -1,0 +1,27 @@
+name: secret scan
+
+# Blocks a credential from entering this repository. It deploys nothing and only
+# fails when a commit or PR introduces a secret.
+#
+# This matters more than usual here: a Dentally token is a bearer credential for an
+# entire dental practice's patient records, and this is a public repository.
+
+on:
+  push:
+    branches: [development, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history, so a leak in any pushed commit is caught
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
