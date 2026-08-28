@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — NEVER commit. .env.example is the only tracked env file.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+tokens.json
+tokens.enc
+audit.log
+
+# graphify code graph is regenerable and huge; a tracked one dirties the tree.
+graphify-out/
+*-Explorer.html
+
+.DS_Store
