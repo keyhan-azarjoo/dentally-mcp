@@ -12,6 +12,7 @@ import os
 import sys
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import auth, config, http_api, surfaces, tools
 from .runtime import FLOW
@@ -73,6 +74,15 @@ def build() -> RoleScopedMCP:
         ),
         host=config.HOST,
         port=config.PORT,
+        # Keep DNS-rebinding protection on in production. FastMCP enables it by itself
+        # only for a loopback bind, so behind a reverse proxy — which is every real
+        # deployment — it would silently not apply. Without it, a malicious page could
+        # drive this server through a victim's browser.
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=config.ALLOWED_HOSTS,
+            allowed_origins=config.ALLOWED_ORIGINS,
+        ),
     )
     tools.register_all(mcp)
     return mcp
