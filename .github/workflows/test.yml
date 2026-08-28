@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [development, main]
+  pull_request:
+
+# Public repository — GitHub-hosted runners are free here, so CI is cheap. Keep it
+# that way: no matrix sprawl, no scheduled runs.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Tests
+        run: pytest -q
+
+      - name: Smoke — server starts, refuses anonymous callers
+        run: python scripts/smoke.py
+
+      - name: No credential ever reaches CI
+        # These tests must pass against a mocked Dentally alone. A secret showing up
+        # here would mean the suite had quietly started needing real patient data.
+        run: |
+          if [ -n "${DENTALLY_API_TOKEN:-}" ]; then
+            echo "DENTALLY_API_TOKEN is set in CI — it must not be." >&2
+            exit 1
+          fi
