@@ -171,6 +171,23 @@ async def run_keepalive(request):
     return JSONResponse({"results": await FLOW.keepalive_once()})
 
 
+async def connect_page(request):
+    """A browser form for connecting a practice, instead of hand-built curl.
+
+    The people who will actually do this are practice managers, not engineers — and
+    even for an engineer, the curl for it is a footgun on Windows, where PowerShell
+    aliases `curl` to Invoke-WebRequest and silently rejects every flag.
+
+    The page posts to `/auth/token`, which already validates the credential against
+    Dentally before storing it. Nothing new is trusted here; this is a front end for
+    an endpoint that already exists.
+
+    It asks for the server's admin token in a field rather than embedding it, so the
+    page itself grants nothing and is safe to leave reachable.
+    """
+    return HTMLResponse(_CONNECT_HTML)
+
+
 async def protected_resource_metadata(request):
     """RFC 9728 metadata so MCP clients can discover how to authorise."""
     return JSONResponse({
@@ -192,8 +209,97 @@ def routes() -> list[Route]:
         Route("/auth/practices", list_practices, methods=["GET"]),
         Route("/auth/practices/{practice_id}", revoke_practice, methods=["DELETE"]),
         Route("/auth/keepalive", run_keepalive, methods=["POST"]),
+        Route("/connect", connect_page, methods=["GET"]),
         Route("/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"]),
     ]
+
+
+_CONNECT_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect a practice — Dentally MCP</title>
+<style>
+ :root { color-scheme: light dark; }
+ body { font-family: -apple-system, system-ui, Segoe UI, sans-serif; max-width: 34rem;
+        margin: 6vh auto; padding: 0 1.5rem; line-height: 1.6; }
+ h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+ p.sub { margin-top: 0; opacity: .75; }
+ label { display: block; margin: 1.1rem 0 .3rem; font-weight: 600; font-size: .92rem; }
+ input { width: 100%; padding: .6rem .7rem; font-size: 1rem; border-radius: .4rem;
+         border: 1px solid #99a; background: transparent; color: inherit; font-family: inherit; }
+ button { margin-top: 1.4rem; padding: .65rem 1.3rem; font-size: 1rem; font-weight: 600;
+          border: 0; border-radius: .4rem; background: #1a6acb; color: #fff; cursor: pointer; }
+ button:disabled { opacity: .5; cursor: default; }
+ .hint { font-size: .85rem; opacity: .75; margin-top: .3rem; }
+ #out { margin-top: 1.5rem; padding: .9rem 1rem; border-radius: .4rem; display: none;
+        white-space: pre-wrap; font-size: .9rem; }
+ .ok { background: #e6f5ec; color: #14532d; }
+ .err { background: #fdeaea; color: #7f1d1d; }
+ code { background: #0001; padding: .1rem .35rem; border-radius: .25rem; }
+</style></head>
+<body>
+<h1>Connect a practice</h1>
+<p class="sub">Links a Dentally practice to this MCP server.</p>
+
+<form id="f">
+  <label for="admin">Server admin token</label>
+  <input id="admin" type="password" autocomplete="off" placeholder="the DENTALLY_MCP_AUTH_TOKEN for this server">
+  <div class="hint">Not your Dentally password. This is the token your server was configured with.</div>
+
+  <label for="tok">Dentally API token</label>
+  <input id="tok" type="password" autocomplete="off" placeholder="generated in Dentally">
+  <div class="hint">In Dentally: <b>Settings &rarr; Developer Settings &rarr; Generate new token</b>.
+     Scope it to only what you need &mdash; <code>patient:read</code>, <code>appointment:read</code>.</div>
+
+  <label for="label">Practice name (optional)</label>
+  <input id="label" type="text" placeholder="e.g. Smile Dental, Bristol">
+
+  <button type="submit" id="go">Check and connect</button>
+</form>
+
+<div id="out"></div>
+
+<script>
+const f = document.getElementById('f'), out = document.getElementById('out'), go = document.getElementById('go');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const admin = document.getElementById('admin').value.trim();
+  const token = document.getElementById('tok').value.trim();
+  if (!admin || !token) { show('err', 'Both tokens are required.'); return; }
+
+  go.disabled = true; go.textContent = 'Checking with Dentally…';
+  try {
+    const r = await fetch('/auth/token', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + admin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token, label: document.getElementById('label').value.trim() || null })
+    });
+    const body = await r.json();
+    if (!r.ok) {
+      // The server already distinguishes "your admin token is wrong" from "Dentally
+      // rejected the practice token"; surfacing that saves the usual guessing.
+      show('err', (r.status === 401 && !body.error?.includes('Dentally'))
+        ? 'The server admin token was not accepted.'
+        : (body.error || ('Failed with HTTP ' + r.status)));
+      return;
+    }
+    const p = body.connected || {};
+    show('ok', 'Connected.\\n\\nPractice: ' + (p.practice_name || p.practice_id) +
+              '\\nPractice ID: ' + p.practice_id +
+              '\\nScopes: ' + ((p.scopes || []).join(' ') || '(not reported)') +
+              '\\n\\nUse this header when calling the MCP server:\\n' +
+              'X-Dentally-Practice: ' + p.practice_id);
+    // Do not leave a live credential sitting in a form field.
+    document.getElementById('tok').value = '';
+  } catch (err) {
+    show('err', 'Could not reach the server: ' + err);
+  } finally {
+    go.disabled = false; go.textContent = 'Check and connect';
+  }
+});
+function show(cls, msg) { out.className = cls; out.textContent = msg; out.style.display = 'block'; }
+</script>
+</body></html>"""
 
 
 def _page(title: str, body: str) -> str:

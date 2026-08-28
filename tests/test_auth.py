@@ -230,3 +230,33 @@ def test_the_built_server_carries_the_host_allow_list(monkeypatch):
     assert settings is not None, "protection must not be left to FastMCP's loopback-only default"
     assert settings.enable_dns_rebinding_protection is True
     assert "dentally.example.com" in settings.allowed_hosts
+
+
+# --- browser connect page ----------------------------------------------------
+def _client():
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+    from dentally_mcp import http_api
+    return TestClient(Starlette(routes=http_api.routes()))
+
+
+def test_connect_page_is_served():
+    resp = _client().get("/connect")
+    assert resp.status_code == 200
+    assert "Connect a practice" in resp.text
+
+
+def test_connect_page_does_not_embed_the_admin_token(monkeypatch):
+    """The page must grant nothing by itself — it asks for the admin token in a
+    field. Baking it into the HTML would make a reachable URL a credential leak."""
+    monkeypatch.setattr(config, "CLIENT_AUTH_TOKEN", "super-secret-admin-token")
+    body = _client().get("/connect").text
+    assert "super-secret-admin-token" not in body
+
+
+def test_connect_page_needs_no_auth_but_the_endpoint_it_posts_to_does(monkeypatch):
+    monkeypatch.setattr(config, "CLIENT_AUTH_TOKEN", "admin-token")
+    c = _client()
+    assert c.get("/connect").status_code == 200
+    # The page is just a form; the real gate is on /auth/token.
+    assert c.post("/auth/token", json={"token": "x"}).status_code == 401
