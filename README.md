@@ -11,8 +11,12 @@ Works with **Claude**, **OpenAI**, and any app of your own over HTTP.
 > **Status: functional, not yet run against production Dentally.** Every tool is
 > implemented and tested against a mocked API; the resources marked ⚠️ in
 > [docs/DENTALLY_API.md](docs/DENTALLY_API.md) still need confirming against the live
-> API. Dentally API access requires partner approval — see
-> [docs/LOGIN.md](docs/LOGIN.md) before planning around this.
+> API.
+>
+> **You do not need partner approval to try this.** A practice can generate its own
+> read-only API token from **Settings → Developer Settings** — see
+> [docs/LOGIN.md](docs/LOGIN.md). Approval is only needed for the sandbox environment
+> and for OAuth across many practices.
 
 ---
 
@@ -43,7 +47,7 @@ cd dentally-mcp
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env          # set DENTALLY_API_TOKEN, keep DENTALLY_REGION=sandbox
+cp .env.example .env          # set DENTALLY_API_TOKEN, and DENTALLY_REGION=uk
 python scripts/login.py --check
 ```
 
@@ -71,17 +75,18 @@ the Claude API, and your own app — are in [docs/CONNECTING.md](docs/CONNECTING
 
 ## Getting Dentally access
 
-**Dentally's API is not open.** It is available to approved integration partners
-only, and practices on Dentally's own forum have reported waiting months for a reply
-to the partner form. Apply early, develop against the sandbox, and do not schedule a
-launch behind an approval you do not control.
-
 Both credential modes are supported:
 
-* **API token** — a single practice generates one in Dentally itself. Minutes to set
-  up. Right for one practice, an internal tool, or a pilot.
+* **API token — no approval needed.** A practice generates one itself in **Settings →
+  Developer Settings**, scoped to what you actually need. Minutes to set up. Right for
+  one practice, an internal tool, or a pilot. Requires a Dentally licence that
+  includes Developer Settings.
 * **OAuth2** — the full authorization-code flow with PKCE, for a product sold to many
-  practices. Needs partner approval.
+  practices. This one does need partner approval, as does the sandbox environment.
+
+Note that Dentally's partner approvals are currently paused, and applicants have
+reported months without a reply — so do not schedule a launch behind one. The
+self-service token route is unaffected.
 
 [docs/LOGIN.md](docs/LOGIN.md) covers both, the scopes to ask for, and the endpoints
 this server exposes for driving login from your own UI.

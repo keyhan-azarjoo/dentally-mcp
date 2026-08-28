@@ -5,21 +5,28 @@ anything on top of this server.
 
 ---
 
-## The one thing that gates everything
+## Start here: you probably do not need partner approval
 
-**Dentally's API is not open.** Access is granted only to approved integration
-partners. You apply, describe your organisation and your use case, and their team
-decides. There is no self-service signup that gives you production API access.
+**A practice can issue its own API token, today, with no application.** Dentally
+staff confirm this on their own forum: any practice you work with can generate a
+read-only token from **Settings → Developer Settings**, scoped to things like
+`patient:read` and `appointment:read`.
 
-Practices on Dentally's own forum have reported submitting the partner form and
-waiting months without a reply. Plan for that: apply on day one, build against the
-sandbox meanwhile, and do not put a launch date on the far side of an approval you
-do not control.
+That is Mode A below, and it is enough to run this server against a real practice.
 
-Apply here: <https://www.dentally.com/en-gb/integrations/become-a-partner>
+Partner approval is needed only for:
 
-Ask for **sandbox access** explicitly in the application. It is a separate host with
-separate credentials, and it is the only place you can develop safely.
+* the **sandbox** environment (a separate host with separate credentials), and
+* **OAuth across many practices** — i.e. selling this as a product.
+
+Worth knowing before you plan around it: **Dentally's partner approvals are
+currently paused**, and applicants have reported months without a reply. So do not
+put a launch date on the far side of one. If you need it eventually, apply early:
+<https://www.dentally.com/en-gb/integrations/become-a-partner>
+
+One catch on the self-service route: **Developer Settings requires the right Dentally
+licence.** If the menu is not there, that is why — the practice needs to ask Dentally
+support to enable it.
 
 ---
 
@@ -29,12 +36,13 @@ separate credentials, and it is the only place you can develop safely.
 |---|---|---|
 | Practices | One | Many |
 | Who holds the credential | The practice generates it in Dentally | Your OAuth app, per practice |
-| Needs partner approval | For production, yes | Yes, always |
-| Set up in | Minutes | Days–months (approval) |
+| Needs partner approval | **No** — self-service | Yes |
+| Needs a licence with Developer Settings | Yes | — |
+| Set up in | Minutes | Weeks–months (approval, currently paused) |
 | Right for | A single practice, an internal tool, a pilot | A product sold to practices |
 
-Start with Mode A on the sandbox. Move to Mode B when you have partner approval and
-more than one practice.
+Start with Mode A. Move to Mode B only when you have more than one practice and
+partner approval.
 
 ---
 
@@ -42,7 +50,14 @@ more than one practice.
 
 ### 1. Generate the token inside Dentally
 
-In Dentally, go to **Settings → Integrations / Developer** and generate a new token.
+Sign in to Dentally, then go to **Settings → Developer Settings → Generate new
+token**.
+
+If you cannot see Developer Settings, the practice's licence does not include it —
+ask Dentally support to enable it.
+
+Treat the token exactly like a password: never email it, rotate it periodically, and
+revoke it from that same Settings page the moment you suspect it has been shared.
 
 **Scope it to the minimum.** The token is a bearer credential for the practice's
 entire patient database; a token scoped to `patient:read` cannot be turned into a
