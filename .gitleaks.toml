@@ -1,0 +1,98 @@
+# Secret scanning for this repository.
+#
+# The point of the extra rules below: gitleaks' built-in `generic-api-key` only
+# fires on a keyword-adjacent ASSIGNMENT (`key: value`, `KEY=value`). A credential
+# written into a SENTENCE —
+#
+#     - **SSH:** `ssh root@host` — password `<the actual value>`
+#
+# — has no assignment, so no default rule ever reaches it. Documentation is exactly
+# where that shape appears, and this repo's docs walk through obtaining Dentally
+# tokens, so it is worth covering.
+#
+# Entropy is deliberately not the discriminator: on real corpora the entropy ranges
+# of true credentials and of ordinary identifiers overlap almost completely.
+# Structure separates them, which is what the allowlist below keys on.
+
+title = "dentally-mcp secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "credential-in-prose"
+description = "Credential quoted in prose — password/secret/PSK written into a sentence, where generic-api-key never fires because there is no assignment"
+path = '''\.(md|markdown|rst|adoc|txt)$'''
+regex = '''(?i)\b(?:pass(?:word|wd|phrase)?|pwd|pw|secret|psk|cred(?:ential)?s?)\b[^\n`"']{0,40}(?:[`"'][^`"'\n]{1,40}[`"'][^\n`"']{0,10})?[`"']([^`"'\n\s]{8,80})[`"']'''
+secretGroup = 1
+entropy = 3.0
+keywords = ["password", "passwd", "passphrase", "pwd", "pw", "secret", "psk", "cred"]
+
+[[rules]]
+id = "cli-password-flag"
+description = "Password passed on a command line (sshpass -p …, --password …). 'sshpass' does not word-boundary-match 'pass', so the prose rule never sees it"
+regex = '''(?i)(?:\bsshpass\s+-p\s*|--password[=\s]+|--pass[=\s]+)["'`]?([^\s"'`\\]{8,80})["'`]?'''
+secretGroup = 1
+entropy = 3.0
+keywords = ["sshpass", "--password", "--pass"]
+
+[[rules]]
+id = "connection-string-credential"
+description = "Credential embedded in a URI (mongodb+srv://user:secret@host, postgres://, redis://, https://user:pass@). Unambiguous wherever it appears, so not restricted to prose"
+regex = '''(?i)\b[a-z][a-z0-9+.\-]*://[^\s:@/]{1,64}:([^\s:@/`"']{6,80})@'''
+secretGroup = 1
+entropy = 2.5
+keywords = ["://"]
+
+[[rules]]
+id = "dentally-bearer-token"
+description = "A Dentally access token pasted into code, config or docs. It is a bearer credential for an entire practice's patient records"
+regex = '''(?i)\bDENTALLY_(?:API_)?TOKEN\s*[:=]\s*["'`]?([A-Za-z0-9_\-]{20,120})["'`]?'''
+secretGroup = 1
+entropy = 3.2
+keywords = ["dentally_token", "dentally_api_token"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Allowlists
+# ─────────────────────────────────────────────────────────────────────────────
+# An allowlist with no `targetRules` disables EVERY rule — including private-key
+# and cloud-credential detection — for everything it matches. Only the generated
+# trees below get that form; everything else is scoped to the noisy rule.
+
+[[allowlists]]
+description = "Build output and dependency caches: generated, gitignored, never hand-edited. A secret can only reach these by first existing in a scanned source file."
+paths = ['''(^|/)(build|dist|\.venv|venv|node_modules|__pycache__|\.pytest_cache)/''']
+
+[[allowlists]]
+description = "Markdown is noisy for the generic high-entropy rule (tables, hashes, base64 samples) but is also where docs quote real credentials in prose. Exempt the noisy rule only — every high-confidence rule stays live in .md."
+targetRules = ["generic-api-key"]
+paths = ['''\.md$''']
+
+[[allowlists]]
+description = "Test fixtures are full of throwaway high-entropy strings. Only the generic rule is exempted; private keys and cloud credentials still fail."
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)(tests?|__tests__)/''']
+
+[[allowlists]]
+description = "Identifier-shaped matches are NAMES, not values: config keys, function calls, hostnames, file paths, placeholders. Anchored on the finding's secret, so a real credential is unaffected unless it is itself shaped exactly like an identifier."
+targetRules = ["credential-in-prose", "cli-password-flag", "connection-string-credential", "dentally-bearer-token"]
+regexes = [
+  '''[-_.]''',                                          # kebab/snake/dotted identifier
+  '''[:()=<>{}\[\];,|]''',                              # code punctuation
+  '''^[A-Za-z]{1,31}$''',                               # letters-only word
+  '''^[a-z0-9]{1,15}$''',                               # short lowercase slug
+  '''^[A-Z0-9]{1,15}$''',                               # short CONSTANT
+  '''[/\\]''',                                          # paths and URLs
+  '''^\$\{''',                                          # ${TEMPLATE}
+  '''(?i)^(?:your|example|placeholder|dummy|sample|changeme|change-me|redacted|xxx+|not-?a-?real)''',
+]
+
+[[allowlists]]
+description = "Documented placeholders. These match the finding's secret, not the whole line — no real credential announces itself as an example."
+regexes = [
+  '''\$\{[A-Z0-9_]+\}''',
+  '''<[A-Z0-9_]+>''',
+  '''\bYOUR_[A-Z0-9_]+\b''',
+  '''(?i)(example|not[_-]?real|placeholder|dummy|fakekey|sample[_-]?(key|secret|token))''',
+  '''(?i)test[_-]?(key|secret|token)''',
+]
