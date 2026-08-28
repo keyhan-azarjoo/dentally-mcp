@@ -68,25 +68,32 @@ client before you have any practice credentials at all. Tools will return a clea
 
 ## 3. nginx and TLS
 
-```bash
-sudo cp /opt/dentally-mcp/deploy/nginx-dentally-mcp.conf /etc/nginx/sites-available/dentally-mcp
-sudo sed -i "s/__HOST__/dentally.your-host.example.com/g" /etc/nginx/sites-available/dentally-mcp
-sudo ln -s /etc/nginx/sites-available/dentally-mcp /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d dentally.your-host.example.com
-```
+On the server, once:
 
-If nginx already serves other sites on that box, check for a duplicate
-`map $http_upgrade` before reloading — nginx refuses to start on one, and that takes
-down every site on the host, not just this one.
+```bash
+sudo /opt/dentally-mcp/deploy/setup-nginx.sh dentally.your-host.example.com you@example.com
+```
 
 Two settings in that vhost are load-bearing, not tuning:
 
 * **`proxy_buffering off`** — MCP's Streamable HTTP keeps a response open and pushes
   events down it. With buffering on, nginx holds them until the stream ends, which for
-  a streaming transport never happens. The client just hangs, with no error.
+  a streaming transport never happens. The client just hangs, and reports no error, so
+  it presents as "the server is broken".
 * **`proxy_read_timeout 3600s`** — nginx's 60-second default cuts off a tool call
   waiting on a slow Dentally response.
+
+**Why the vhost ships as a port-80 block only.** `certbot --nginx` builds the TLS
+block by cloning the HTTP one, so whatever is in `location /` there is what ends up
+serving HTTPS. An earlier version of this file also shipped a 443 block with a simpler
+location; certbot's clone won, and the result was a TLS vhost with buffering on — the
+hang described above, on the deployment that mattered. Keep the real configuration in
+the port-80 block. `setup-nginx.sh` asserts the TLS block came out right rather than
+assuming it.
+
+If nginx already serves other sites on that box, a duplicate `map $http_upgrade` makes
+nginx refuse to start, which takes down every site on the host. The map here is
+uniquely named (`$connection_upgrade_dentally`) to avoid that, and the script checks.
 
 ---
 
