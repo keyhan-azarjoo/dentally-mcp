@@ -51,6 +51,11 @@ class Resolver:
     def resolve(self, practice_id: str | None = None) -> Credential:
         practice_id = practice_id or current_practice.get()
 
+        if config.DEMO:
+            return Credential("demo", "demo-token",
+                              ["user:read", "patient:read", "appointment:read"],
+                              "DEMO PRACTICE — synthetic data, not a real practice")
+
         # Single-practice mode: the env token wins and no practice needs naming.
         if config.API_TOKEN and not practice_id:
             return Credential(
@@ -90,6 +95,16 @@ class Resolver:
         )
 
     def client(self, practice_id: str | None = None) -> DentallyClient:
+        if config.DEMO:
+            # Swap only the transport. Everything above it — pagination, the rate
+            # limiter, redaction, the projections — is the code that ships, so a demo
+            # exercises the real thing rather than a parallel implementation.
+            from .demo import transport
+
+            client = DentallyClient("demo-token", transport=transport())
+            client.scopes = ["user:read", "patient:read", "appointment:read"]
+            return client
+
         cred = self.resolve(practice_id)
         client = DentallyClient(cred.access_token)
         client.scopes = list(cred.scopes)

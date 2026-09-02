@@ -48,6 +48,15 @@ IS_SANDBOX = "sandbox" in API_BASE
 # Mode A: a single practice's own API token (Settings -> Integrations -> API).
 API_TOKEN = os.environ.get("DENTALLY_API_TOKEN", "").strip()
 
+# Mode C: DEMO — a synthetic Dentally, no credential of any kind.
+#
+# Getting a real token needs an admin account and the right licence, and the sandbox
+# needs partner approval. Without this, anyone evaluating the server — or a nurse who
+# wants to show their practice manager what it does before asking for access — has
+# nothing to run. The fake is the *upstream* only: rate limiting, pagination,
+# redaction and role scoping are all the real code path.
+DEMO = _flag("DENTALLY_DEMO", False)
+
 # Mode B: OAuth2 authorization-code, for a multi-practice integration. The endpoint
 # paths are configurable because Dentally hands the exact authorize/token URLs to
 # each partner at onboarding; the defaults are the conventional ones.

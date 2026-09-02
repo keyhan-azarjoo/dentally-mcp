@@ -186,8 +186,11 @@ def run_http() -> None:
         # would look wired up and silently never run.
         _wrap_lifespan(app, FLOW.keepalive_loop)
 
+    if config.DEMO:
+        log.warning("DEMO MODE: serving SYNTHETIC data. No real practice is connected.")
     log.info("Dentally MCP on http://%s:%s/mcp (%s, %s)", config.HOST, config.PORT,
-             config.REGION, "writes ON" if config.ALLOW_WRITES else "read-only")
+             "DEMO" if config.DEMO else config.REGION,
+             "writes ON" if config.ALLOW_WRITES else "read-only")
     uvicorn.run(_context_middleware(app), host=config.HOST, port=config.PORT, log_level="info")
 
 
@@ -195,7 +198,10 @@ def run_stdio() -> None:
     mcp = build()
     auth.current_surface.set(surfaces.normalise(config.DEFAULT_SURFACE))
     auth.current_caller.set("stdio")
-    log.info("Dentally MCP on stdio (%s, role=%s, %s)", config.REGION,
+    if config.DEMO:
+        log.warning("DEMO MODE: serving SYNTHETIC data. No real practice is connected.")
+    log.info("Dentally MCP on stdio (%s, role=%s, %s)",
+             "DEMO" if config.DEMO else config.REGION,
              surfaces.normalise(config.DEFAULT_SURFACE),
              "writes ON" if config.ALLOW_WRITES else "read-only")
     mcp.run(transport="stdio")
