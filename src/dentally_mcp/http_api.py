@@ -55,7 +55,10 @@ async def healthz(request):
         "region": config.REGION,
         "api_base": config.API_BASE,
         "environment": "sandbox" if config.IS_SANDBOX else "production",
-        "auth_mode": "api_token" if config.API_TOKEN else ("oauth" if config.CLIENT_ID else "unconfigured"),
+        "demo_mode": config.DEMO,
+        "auth_mode": ("DEMO — synthetic data, not a real practice" if config.DEMO
+                      else "api_token" if config.API_TOKEN
+                      else "oauth" if config.CLIENT_ID else "unconfigured"),
         "writes_enabled": config.ALLOW_WRITES,
         "pii_redacted": config.REDACT_PII,
         "practices_connected": len(STORE.list_ids()) if config.TOKEN_STORE_KEY else 0,

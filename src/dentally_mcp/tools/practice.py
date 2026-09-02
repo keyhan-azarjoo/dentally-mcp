@@ -28,7 +28,10 @@ def register(mcp) -> None:
             "practice_name": cred.practice_name or user.get("practice_name"),
             "user": user.get("name") or user.get("full_name"),
             "region": config.REGION,
-            "environment": "sandbox" if config.IS_SANDBOX else "production",
+            "environment": ("DEMO — every record below is invented; this is NOT a real "
+                            "practice and NOT real patient data"
+                            if config.DEMO
+                            else "sandbox" if config.IS_SANDBOX else "production"),
             "role": role,
             "scopes": observed or cred.scopes,
             "writes_enabled": config.ALLOW_WRITES,
