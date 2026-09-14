@@ -82,6 +82,41 @@ PUBLIC_URL = os.environ.get("DENTALLY_MCP_PUBLIC_URL", f"http://localhost:{PORT}
 CLIENT_AUTH_TOKEN = os.environ.get("DENTALLY_MCP_AUTH_TOKEN", "").strip()
 
 
+def _client_tokens() -> dict[str, frozenset[str]]:
+    """Optional per-client tokens, each scoped to the practices it may reach.
+
+    Without this, the server token is the ONLY boundary between clients: anyone
+    holding it can name any connected practice in `X-Dentally-Practice`. That is
+    fine for one practice, and a cross-practice data breach waiting to happen the
+    moment two customers share a deployment.
+
+    Format (JSON object, token -> list of practice ids; `["*"]` means all):
+
+        DENTALLY_MCP_CLIENT_TOKENS='{"abc123": ["4412"], "def456": ["*"]}'
+
+    `DENTALLY_MCP_AUTH_TOKEN` keeps working unchanged and grants all practices, so
+    an existing single-practice deployment is unaffected.
+    """
+    raw = os.environ.get("DENTALLY_MCP_CLIENT_TOKENS", "").strip()
+    if not raw:
+        return {}
+    import json
+
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        # Fail loudly. A malformed mapping that silently became "no scoping" would
+        # hand every client access to every practice — the exact opposite of intent.
+        raise SystemExit(f"DENTALLY_MCP_CLIENT_TOKENS is not valid JSON: {exc}")
+    if not isinstance(parsed, dict):
+        raise SystemExit("DENTALLY_MCP_CLIENT_TOKENS must be a JSON object of token -> [practice ids].")
+    return {str(k): frozenset(str(v) for v in (vals if isinstance(vals, list) else [vals]))
+            for k, vals in parsed.items()}
+
+
+CLIENT_TOKENS = _client_tokens()
+
+
 def _allowed_hosts() -> list[str]:
     """Host header allow-list for DNS-rebinding protection.
 

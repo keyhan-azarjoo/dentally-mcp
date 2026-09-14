@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date, timedelta
 from typing import Any, Iterable, Mapping
 
 import httpx
 
 from . import config
-from .errors import DentallyError, UpstreamError, from_response
+from .errors import DentallyError, UpstreamError, ValidationError, from_response
 from .ratelimit import RateLimiter
 
 log = logging.getLogger("dentally_mcp.client")
@@ -241,6 +242,36 @@ def clamp_date_window(
     if (d_end - d_start).days > max_days:
         d_end = d_start + timedelta(days=max_days)
     return d_start.isoformat(), d_end.isoformat()
+
+
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def safe_id(value: object, field: str = "id") -> str:
+    """Validate an identifier before it is interpolated into a URL path.
+
+    Tool arguments come from the model, and the model's input includes text read out
+    of patient records — so an id is untrusted input, not a number we can trust.
+
+    Interpolating one straight into a path was exploitable two ways, both measured
+    against httpx rather than assumed:
+
+      * `9001/../../oauth/token` — httpx COLLAPSES the traversal, so the request
+        went to `/v1/oauth/token` instead of the patient. That redirects a tool call
+        to any endpoint on the API, carrying the practice's bearer token.
+      * `1?per_page=999` — a `?` starts a query string, letting a caller append or
+        override parameters and walk straight past the pagination caps.
+
+    An allow-list of the characters a real Dentally id uses closes both at once.
+    Rejecting is correct here: no legitimate id contains `/`, `?`, `#` or `..`.
+    """
+    text = str(value if value is not None else "").strip()
+    if not _ID_RE.match(text):
+        raise ValidationError(
+            f"{field} must be a plain Dentally identifier (letters, digits, '-' or "
+            f"'_', up to 64 characters) — got {text[:60]!r}."
+        )
+    return text
 
 
 def has_scope(scopes: Iterable[str], needed: str) -> bool:

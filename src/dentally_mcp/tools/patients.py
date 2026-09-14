@@ -6,7 +6,7 @@ from typing import Any
 from mcp.server.fastmcp import Context
 
 from .. import redaction
-from ..client import clamp_date_window
+from ..client import clamp_date_window, safe_id
 from ..errors import DentallyError, ValidationError
 from ..surfaces import hints
 from ..runtime import confirm, tool, use_client
@@ -43,7 +43,7 @@ def register(mcp) -> None:
             # straight to the record avoids a fuzzy search that may not surface it.
             if query.isdigit():
                 try:
-                    body = await client.get(f"patients/{query}")
+                    body = await client.get(f"patients/{safe_id(query, 'patient_id')}")
                     patient = body.get("patient") if isinstance(body, dict) else None
                     if patient:
                         return [redaction.scrub(redaction.patient_summary(patient))]
@@ -71,7 +71,7 @@ def register(mcp) -> None:
             patient_id: The Dentally patient ID.
         """
         async with use_client() as client:
-            body = await client.get(f"patients/{patient_id}")
+            body = await client.get(f"patients/{safe_id(patient_id, 'patient_id')}")
         patient = body.get("patient") if isinstance(body, dict) else body
         if not patient:
             raise DentallyError(f"No patient {patient_id} in Dentally.")
@@ -89,7 +89,7 @@ def register(mcp) -> None:
             patient_id: The Dentally patient ID.
         """
         async with use_client() as client:
-            body = await client.get(f"patients/{patient_id}")
+            body = await client.get(f"patients/{safe_id(patient_id, 'patient_id')}")
             patient = body.get("patient") if isinstance(body, dict) else {}
 
             appts = await client.list_all(
@@ -197,7 +197,7 @@ def register(mcp) -> None:
         await confirm(ctx, "Update patient contact details in Dentally",
                       f"Patient {patient_id}: change {', '.join(sorted(changes))}")
         async with use_client() as client:
-            body = await client.put(f"patients/{patient_id}", {"patient": changes})
+            body = await client.put(f"patients/{safe_id(patient_id, 'patient_id')}", {"patient": changes})
         updated = body.get("patient") if isinstance(body, dict) else body
         return redaction.scrub(redaction.patient_summary(updated or {}))
 

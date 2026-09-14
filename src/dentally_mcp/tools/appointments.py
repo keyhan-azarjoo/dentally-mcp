@@ -6,7 +6,7 @@ from typing import Any
 from mcp.server.fastmcp import Context
 
 from .. import redaction
-from ..client import clamp_date_window
+from ..client import clamp_date_window, safe_id
 from ..errors import DentallyError, ValidationError
 from ..surfaces import hints
 from ..runtime import confirm, tool, use_client
@@ -64,7 +64,7 @@ def register(mcp) -> None:
             appointment_id: The Dentally appointment ID.
         """
         async with use_client() as client:
-            body = await client.get(f"appointments/{appointment_id}")
+            body = await client.get(f"appointments/{safe_id(appointment_id, 'appointment_id')}")
         appt = body.get("appointment") if isinstance(body, dict) else body
         if not appt:
             raise DentallyError(f"No appointment {appointment_id} in Dentally.")
@@ -193,7 +193,7 @@ def register(mcp) -> None:
             "practitioner_id": practitioner_id,
         })
         async with use_client() as client:
-            body = await client.put(f"appointments/{appointment_id}", {"appointment": changes})
+            body = await client.put(f"appointments/{safe_id(appointment_id, 'appointment_id')}", {"appointment": changes})
         appt = body.get("appointment") if isinstance(body, dict) else body
         return redaction.scrub(redaction.appointment_summary(appt or {}))
 
@@ -220,7 +220,7 @@ def register(mcp) -> None:
             "cancellation_reason_id": cancellation_reason_id,
         })
         async with use_client() as client:
-            body = await client.put(f"appointments/{appointment_id}", {"appointment": changes})
+            body = await client.put(f"appointments/{safe_id(appointment_id, 'appointment_id')}", {"appointment": changes})
         appt = body.get("appointment") if isinstance(body, dict) else body
         return redaction.scrub(redaction.appointment_summary(appt or {}))
 
