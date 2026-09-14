@@ -45,14 +45,31 @@ def main() -> int:
 
     resp = client.get("/healthz")
     check("/healthz answers", resp.status_code == 200, str(resp.json().get("status")))
-    check("sandbox by default", resp.json().get("environment") == "sandbox")
-    check("read-only by default", resp.json().get("writes_enabled") is False)
+    # Anonymous /healthz is liveness only. Whether writes are on and how many
+    # practices are connected is reconnaissance, so it needs the admin token.
+    check("/healthz hides config from anonymous callers",
+          "writes_enabled" not in resp.json() and "api_base" not in resp.json())
+
+    auth = {"Authorization": "Bearer " + os.environ["DENTALLY_MCP_AUTH_TOKEN"]}
+    detail = client.get("/healthz", headers=auth).json()
+    check("sandbox by default", detail.get("environment") == "sandbox")
+    check("read-only by default", detail.get("writes_enabled") is False)
 
     resp = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     check("/mcp rejects an unauthenticated caller", resp.status_code == 401)
 
     resp = client.get("/.well-known/oauth-protected-resource")
     check("OAuth resource metadata is published", resp.status_code == 200)
+
+    resp = client.get("/auth/callback", params={"error": "<script>alert(1)</script>"})
+    check("callback escapes reflected input", "<script>alert" not in resp.text)
+    check("HTML pages carry a CSP",
+          "default-src 'none'" in resp.headers.get("content-security-policy", ""))
+
+    annotated = [t for t in mcp._tool_manager.list_tools()
+                 if t.annotations and isinstance(t.annotations.readOnlyHint, bool)]
+    check("every tool declares its hints", len(annotated) == len(tool_names),
+          f"{len(annotated)}/{len(tool_names)}")
 
     resp = client.post("/auth/validate", json={"token": "x"})
     check("/auth/validate needs the server token", resp.status_code == 401)

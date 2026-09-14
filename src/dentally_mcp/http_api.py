@@ -18,6 +18,7 @@ server's own bearer token. Practice tokens are never returned by any endpoint.
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
 
@@ -31,31 +32,87 @@ from .runtime import FLOW, STORE
 log = logging.getLogger("dentally_mcp.http")
 
 
+def _esc(value: object) -> str:
+    """Escape untrusted text for HTML. Everything not literal in this file is untrusted."""
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def _html_headers(*, connect_page: bool = False) -> dict[str, str]:
+    """Security headers for the HTML pages.
+
+    The connect page collects two live credentials, so a script injected into it
+    would be a credential thief. The CSP is the backstop for that: even if an
+    escaping bug slipped back in, injected script has no way to run or phone home.
+
+    `unsafe-inline` is present only because the page's own script and style are
+    inline; it is scoped by `default-src 'none'`, so there is still no path to an
+    external origin. frame-ancestors 'none' stops the credential form being framed
+    and clickjacked.
+    """
+    script = "'unsafe-inline'" if connect_page else "'none'"
+    return {
+        "Content-Security-Policy": (
+            f"default-src 'none'; style-src 'unsafe-inline'; script-src {script}; "
+            "form-action 'none'; frame-ancestors 'none'; base-uri 'none'; connect-src 'self'"
+        ),
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        # These pages handle credentials; a shared cache holding one would be a leak.
+        "Cache-Control": "no-store",
+    }
+
+
 def _guard(request):
     """Admin endpoints need the server's own bearer token, not Dentally's."""
     if not auth.verify_client(request.headers.get("authorization")):
+        # Log the rejection. Without this, someone probing for the admin token leaves
+        # no trace at all, and the first sign of a problem is a connected practice
+        # nobody added. The token itself is never logged.
+        log.warning("Rejected unauthenticated request to %s from %s",
+                    request.url.path,
+                    request.client.host if request.client else "unknown")
         return JSONResponse({"error": "unauthorized"}, status_code=401,
                             headers={"WWW-Authenticate": 'Bearer realm="dentally-mcp"'})
     return None
 
 
 def _error(exc: Exception, status: int = 400) -> JSONResponse:
+    """Return our own message, never Dentally's raw response body.
+
+    `DentallyError.detail` holds the upstream body verbatim. On a 422 that body
+    echoes back the fields we submitted — which for `register_patient` is a name and
+    a date of birth. Forwarding it turned every validation failure into a small
+    patient-data disclosure to whoever called the endpoint. The detail stays on the
+    exception for server-side logging; it does not cross the wire.
+    """
     if isinstance(exc, DentallyError):
         return JSONResponse(
-            {"error": exc.message, "status": exc.status, "detail": exc.detail},
+            {"error": exc.message, "status": exc.status},
             status_code=exc.status or status,
         )
     return JSONResponse({"error": str(exc)}, status_code=status)
 
 
 async def healthz(request):
-    """Liveness plus enough configuration truth to debug a bad deploy."""
+    """Liveness. Configuration detail only for an authenticated caller.
+
+    This endpoint has to stay public so a load balancer can probe it, but the full
+    body was reconnaissance for anyone who found the URL: whether writes are on,
+    whether redaction is off, and how many practices are connected together describe
+    exactly how rewarding an attack would be. The unauthenticated answer is now
+    liveness plus the demo flag — the demo flag stays public precisely because
+    mistaking synthetic data for a real diary is the failure it prevents.
+    """
+    public = {"status": "ok", "demo_mode": config.DEMO}
+    if not auth.verify_client(request.headers.get("authorization")):
+        return JSONResponse(public)
+
     return JSONResponse({
-        "status": "ok",
+        **public,
         "region": config.REGION,
         "api_base": config.API_BASE,
         "environment": "sandbox" if config.IS_SANDBOX else "production",
-        "demo_mode": config.DEMO,
         "auth_mode": ("DEMO — synthetic data, not a real practice" if config.DEMO
                       else "api_token" if config.API_TOKEN
                       else "oauth" if config.CLIENT_ID else "unconfigured"),
@@ -80,25 +137,33 @@ async def auth_callback(request):
     """Dentally redirects here with ?code & ?state. Exchange and store."""
     error = request.query_params.get("error")
     if error:
-        return HTMLResponse(_page("Authorisation refused", f"Dentally reported: {error}"), status_code=400)
+        # `error` is a raw query parameter on an UNAUTHENTICATED endpoint. Escaping
+        # it is the whole fix for the reflected XSS this line used to be.
+        return HTMLResponse(_page("Authorisation refused", f"Dentally reported: {_esc(error)}"),
+                            status_code=400, headers=_html_headers())
 
     code = request.query_params.get("code")
     state = request.query_params.get("state")
     if not code or not state:
-        return HTMLResponse(_page("Missing details", "The callback had no code or state."), status_code=400)
+        return HTMLResponse(_page("Missing details", "The callback had no code or state."),
+                            status_code=400, headers=_html_headers())
 
     try:
         token = await FLOW.exchange(code, state)
     except DentallyError as exc:
         log.warning("OAuth exchange failed: %s", exc.message)
-        return HTMLResponse(_page("Could not complete sign-in", exc.message), status_code=400)
+        # An error message can carry text Dentally sent us; treat it as untrusted.
+        return HTMLResponse(_page("Could not complete sign-in", _esc(exc.message)),
+                            status_code=400, headers=_html_headers())
 
+    # The practice name comes back from Dentally's API, so it is untrusted input
+    # even though the source is a system we authenticated to.
     return HTMLResponse(_page(
         "Connected to Dentally",
-        f"Practice <b>{token.practice_name or token.practice_id}</b> is now connected. "
-        f"Use <code>X-Dentally-Practice: {token.practice_id}</code> when calling the MCP server."
+        f"Practice <b>{_esc(token.practice_name or token.practice_id)}</b> is now connected. "
+        f"Use <code>X-Dentally-Practice: {_esc(token.practice_id)}</code> when calling the MCP server."
         "<br><br>You can close this window.",
-    ))
+    ), headers=_html_headers())
 
 
 async def auth_token(request):
@@ -188,7 +253,7 @@ async def connect_page(request):
     It asks for the server's admin token in a field rather than embedding it, so the
     page itself grants nothing and is safe to leave reachable.
     """
-    return HTMLResponse(_CONNECT_HTML)
+    return HTMLResponse(_CONNECT_HTML, headers=_html_headers(connect_page=True))
 
 
 async def protected_resource_metadata(request):
@@ -305,13 +370,21 @@ function show(cls, msg) { out.className = cls; out.textContent = msg; out.style.
 </body></html>"""
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body_html: str) -> str:
+    """Render a small status page.
+
+    `body_html` is TRUSTED MARKUP — every caller must escape anything that did not
+    come from this file. Use `_esc()` on it. The parameter is named `body_html`
+    rather than `body` so that obligation is visible at each call site: an earlier
+    version took `body` and one caller passed a query parameter straight through,
+    which was a reflected XSS on an unauthenticated endpoint.
+    """
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>{title}</title>
+<html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}</title>
 <style>
  body {{ font-family: -apple-system, system-ui, sans-serif; max-width: 34rem;
         margin: 12vh auto; padding: 0 1.5rem; color: #16222c; line-height: 1.6; }}
  h1 {{ font-size: 1.4rem; margin-bottom: .5rem; }}
  code {{ background: #eef2f5; padding: .1rem .35rem; border-radius: .25rem; }}
 </style></head>
-<body><h1>{title}</h1><p>{body}</p></body></html>"""
+<body><h1>{html.escape(title)}</h1><p>{body_html}</p></body></html>"""

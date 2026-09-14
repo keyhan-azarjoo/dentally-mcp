@@ -38,6 +38,15 @@ USE_PKCE = os.environ.get("DENTALLY_OAUTH_PKCE", "1").strip().lower() not in ("0
 # How long an in-flight authorization may stay pending before its state is dropped.
 STATE_TTL_SECONDS = 600
 
+# Hard ceiling on in-flight authorizations.
+#
+# `/auth/login` is unauthenticated by necessity — a practice has to reach it before
+# it has any credential — and every call allocated a pending entry that lived for ten
+# minutes. Anyone who could reach the URL could grow that dict without limit and
+# exhaust the process's memory. A real onboarding never has more than a handful in
+# flight, so the cap costs nothing and closes the hole.
+MAX_PENDING_STATES = 256
+
 
 @dataclass
 class PendingAuth:
@@ -68,6 +77,14 @@ class OAuthFlow:
             raise DentallyError("DENTALLY_REDIRECT_URI is not set; it must exactly match the value registered with Dentally.")
 
         self._expire_stale()
+        if len(self._pending) >= MAX_PENDING_STATES:
+            # Evict the oldest rather than refuse the request: a flood must not be
+            # able to lock a real practice out of starting its own login.
+            oldest = min(self._pending.values(), key=lambda p: p.created_at)
+            del self._pending[oldest.state]
+            log.warning("Pending OAuth states hit the %d cap; evicted the oldest.",
+                        MAX_PENDING_STATES)
+
         state = secrets.token_urlsafe(32)
         verifier = secrets.token_urlsafe(64)
         self._pending[state] = PendingAuth(state, verifier, practice_hint, time.time())

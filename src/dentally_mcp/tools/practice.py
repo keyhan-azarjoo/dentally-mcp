@@ -5,12 +5,13 @@ from typing import Any
 
 from .. import auth, config, redaction, surfaces
 from ..client import clamp_date_window
+from ..surfaces import hints
 from ..runtime import RESOLVER, tool, use_client
 
 
 def register(mcp) -> None:
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("whoami"))
     @tool("whoami")
     async def whoami() -> dict[str, Any]:
         """Confirm which Dentally practice this session is connected to, and what it may do.
@@ -39,7 +40,7 @@ def register(mcp) -> None:
             "available_tools": sorted(surfaces.visible(role)),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_practitioners"))
     @tool("list_practitioners")
     async def list_practitioners(site_id: str | None = None, active_only: bool = True) -> list[dict[str, Any]]:
         """List the practice's dentists, hygienists and therapists.
@@ -63,7 +64,7 @@ def register(mcp) -> None:
             for p in records
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_sites"))
     @tool("list_sites")
     async def list_sites() -> list[dict[str, Any]]:
         """List the practice's sites (locations). Needed for multi-site groups."""
@@ -79,7 +80,7 @@ def register(mcp) -> None:
             for s in records
         ])
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_recalls_due"))
     @tool("list_recalls_due")
     async def list_recalls_due(
         start_date: str | None = None,

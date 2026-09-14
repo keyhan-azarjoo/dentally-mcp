@@ -6,12 +6,13 @@ from typing import Any
 from .. import redaction
 from ..client import clamp_date_window
 from ..errors import DentallyError
+from ..surfaces import hints
 from ..runtime import tool, use_client
 
 
 def register(mcp) -> None:
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_invoices"))
     @tool("list_invoices")
     async def list_invoices(
         start_date: str | None = None,
@@ -40,7 +41,7 @@ def register(mcp) -> None:
             )
         return redaction.project(records, redaction.money_summary)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_payments"))
     @tool("list_payments")
     async def list_payments(
         start_date: str | None = None,
@@ -67,7 +68,7 @@ def register(mcp) -> None:
             )
         return redaction.project(records, redaction.money_summary)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("get_patient_account"))
     @tool("get_patient_account")
     async def get_patient_account(patient_id: str) -> dict[str, Any]:
         """A patient's financial account: balance and what is outstanding.
@@ -84,7 +85,7 @@ def register(mcp) -> None:
             "accounts": [redaction.money_summary(a) for a in records],
         })
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_nhs_claims"))
     @tool("list_nhs_claims")
     async def list_nhs_claims(
         start_date: str | None = None,
@@ -124,7 +125,7 @@ def register(mcp) -> None:
             }.items() if v is not None})
         return redaction.scrub(out)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("revenue_summary"))
     @tool("revenue_summary")
     async def revenue_summary(
         start_date: str | None = None,
@@ -164,7 +165,7 @@ def register(mcp) -> None:
                     "Dentally's own reporting before using for accounting.",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("get_fees"))
     @tool("get_fees")
     async def get_fees(query: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """Look up treatment fees and their default appointment durations.

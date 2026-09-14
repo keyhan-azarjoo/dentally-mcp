@@ -26,14 +26,38 @@ logging.basicConfig(
 )
 log = logging.getLogger("dentally_mcp")
 
+def _scrub_event(event, hint):  # pragma: no cover - exercised via Sentry only
+    """Last line of defence before an event leaves the process."""
+    event.pop("request", None)          # headers carry the bearer token
+    event.pop("extra", None)
+    event.pop("user", None)
+    for exc in (event.get("exception") or {}).get("values") or []:
+        for frame in (exc.get("stacktrace") or {}).get("frames") or []:
+            frame.pop("vars", None)     # belt and braces over include_local_variables
+    return event
+
+
 if config.SENTRY_DSN:  # pragma: no cover
     import sentry_sdk
 
     sentry_sdk.init(
         dsn=config.SENTRY_DSN,
         environment=config.SENTRY_ENVIRONMENT,
-        send_default_pii=False,  # never ship patient data to an error tracker
+        send_default_pii=False,
+        # `send_default_pii=False` alone was NOT enough, and the gap is easy to miss:
+        # it governs request bodies and user context, not stack frames. Sentry's
+        # `include_local_variables` defaults to TRUE, so any exception inside a tool
+        # would have shipped that frame's locals — `records`, `patient`, `body`,
+        # `due` — which at that point hold raw Dentally patient rows. A single
+        # unhandled error would have put a practice's patient data in a third-party
+        # error tracker.
+        include_local_variables=False,
+        # Truncate anything that does get through; an exception message can carry a
+        # chunk of an upstream response body.
+        max_value_length=256,
+        before_send=_scrub_event,
     )
+
 
 
 class RoleScopedMCP(FastMCP):

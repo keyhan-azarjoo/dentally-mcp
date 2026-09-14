@@ -110,6 +110,41 @@ just a second copy of the patient database with weaker access control.
 
 ---
 
+### Tool annotations declare what each tool does
+
+All 25 tools carry explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and
+`openWorldHint` values, so a host can warn before a call that changes the diary. A
+test ties `readOnlyHint: false` to the same `WRITE_TOOLS` set the write gate enforces,
+so the warning a user sees cannot drift from the control that actually applies.
+
+### The HTML pages escape everything and carry a CSP
+
+`/connect` collects two live credentials, so injected script there would be a
+credential thief. Every interpolation is escaped, and `default-src 'none'` with
+`frame-ancestors 'none'` is the backstop if an escaping bug ever returns.
+
+---
+
+## Known limits — read these before a multi-tenant deployment
+
+Two things this server does NOT do. Both are deliberate, and both matter if you host
+it for more than one practice.
+
+**The server token is the whole trust boundary between clients.** Any caller holding
+`DENTALLY_MCP_AUTH_TOKEN` may name any connected practice in `X-Dentally-Practice`.
+There is no per-token practice allow-list. So a single shared token across several
+customers means any of them can read all of them. Until that exists: issue one
+deployment per customer, or put your own backend in front and never let a customer's
+client hold the server token directly.
+
+**The role header is not a defence against the client.** `X-Dentally-Role` scopes what
+the *model* can see and invoke, which is its purpose — narrowing the blast radius of a
+prompt injection. It does not restrain a caller that has already authenticated, since
+that caller chooses the header. Derive it in your backend from the signed-in user's
+job role; do not accept it from anything the user or model controls.
+
+---
+
 ## Threat notes
 
 **Prompt injection through patient data.** A patient note, an appointment note or a
@@ -126,6 +161,13 @@ list into a context window.
 everything else the practice runs, including its online booking. A runaway loop in
 your assistant takes their booking page down. The client-side limiter is sized under
 the ceiling for that reason.
+
+**Error reporting.** Sentry is inert without a DSN. With one, `send_default_pii=False`
+is not sufficient on its own — it governs request bodies and user context, not stack
+frames, and `include_local_variables` defaults to true. At the point a tool raises,
+its locals hold raw Dentally patient rows, so that default would have shipped patient
+data to a third party on any unhandled error. Local variables are disabled, values are
+truncated, and a `before_send` hook strips request data, `extra` and frame variables.
 
 **Model provider retention.** Everything a tool returns goes to whoever runs the
 model, and may be retained under their terms. This is the single biggest data
