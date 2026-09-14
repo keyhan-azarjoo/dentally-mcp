@@ -245,3 +245,136 @@ async def test_every_tool_is_open_world():
 def test_the_annotation_table_covers_every_write_tool():
     """A write tool missing from the table would raise KeyError at registration."""
     assert set(surfaces._WRITE_ANNOTATIONS) == surfaces.WRITE_TOOLS
+
+
+# --- path / query injection through tool arguments ---------------------------
+def test_httpx_really_does_collapse_a_traversal():
+    """The premise of the fix, measured rather than assumed: an id containing `..`
+    does not 404, it silently retargets the request."""
+    import httpx
+
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as c:
+        c.get("https://api.dentally.co/v1/patients/1/../../oauth/token")
+    assert seen["url"].endswith("/v1/oauth/token")
+
+
+@pytest.mark.parametrize("bad", [
+    "9001/../../oauth/token",   # retarget the request to another endpoint
+    "1?per_page=999",           # append query params, defeating the pagination cap
+    "1#fragment",
+    "1/appointments",
+    "../../../etc/passwd",
+    "1 2",
+    "",
+    "x" * 65,
+])
+def test_an_unsafe_identifier_is_rejected(bad):
+    from dentally_mcp.client import safe_id
+    from dentally_mcp.errors import ValidationError
+
+    with pytest.raises(ValidationError):
+        safe_id(bad, "patient_id")
+
+
+@pytest.mark.parametrize("good", ["9001", "abc-123", "A_b9", "1"])
+def test_a_real_identifier_still_passes(good):
+    from dentally_mcp.client import safe_id
+
+    assert safe_id(good) == good
+
+
+async def test_a_traversal_id_never_reaches_the_network(monkeypatch):
+    """End to end: the guard must fire before the request is built, not after."""
+    from dentally_mcp import auth
+
+    calls = []
+
+    def fake_client(self, practice_id=None):
+        import httpx
+
+        from dentally_mcp.client import DentallyClient
+        from dentally_mcp.ratelimit import RateLimiter
+
+        def handler(request):
+            calls.append(str(request.url))
+            return httpx.Response(200, json={"patient": {"id": 1}})
+
+        return DentallyClient("t", transport=httpx.MockTransport(handler),
+                              limiter=RateLimiter(3_600_000))
+
+    monkeypatch.setattr(config, "API_TOKEN", "t")
+    monkeypatch.setattr(config, "TOKEN_STORE_KEY", "")
+    monkeypatch.setattr(auth.Resolver, "client", fake_client)
+    t = auth.current_surface.set("full")
+    try:
+        with pytest.raises(Exception, match="plain Dentally identifier"):
+            await build().call_tool("get_patient", {"patient_id": "1/../../oauth/token"})
+    finally:
+        auth.current_surface.reset(t)
+    assert calls == [], "the request must never have been sent"
+
+
+# --- per-client practice scoping ---------------------------------------------
+def test_a_scoped_token_cannot_reach_another_practice(monkeypatch):
+    """Without this the server token is the only boundary between clients, so one
+    customer's client can read another customer's patients."""
+    from dentally_mcp import auth
+    from dentally_mcp.errors import AuthError
+    from dentally_mcp.tokenstore import TokenStore
+
+    monkeypatch.setattr(config, "CLIENT_TOKENS", {"tok-a": frozenset({"p1"})})
+    monkeypatch.setattr(config, "CLIENT_AUTH_TOKEN", "")
+    monkeypatch.setattr(config, "API_TOKEN", "x")
+    monkeypatch.setattr(config, "TOKEN_STORE_KEY", "")
+
+    assert auth.allowed_practices("Bearer tok-a") == frozenset({"p1"})
+    assert auth.allowed_practices("Bearer tok-b") is None
+
+    t = auth.current_allowed.set(frozenset({"p1"}))
+    try:
+        resolver = auth.Resolver(TokenStore("/tmp/never-written.enc"))
+        resolver.resolve("p1")                       # permitted
+        with pytest.raises(AuthError, match="not authorised for practice"):
+            resolver.resolve("p2")
+    finally:
+        auth.current_allowed.reset(t)
+
+
+def test_a_scoped_client_must_name_its_practice(monkeypatch):
+    """Falling back to 'the only practice connected' would quietly ignore the scope."""
+    from dentally_mcp import auth
+    from dentally_mcp.errors import AuthError
+    from dentally_mcp.tokenstore import TokenStore
+
+    monkeypatch.setattr(config, "API_TOKEN", "x")
+    monkeypatch.setattr(config, "TOKEN_STORE_KEY", "")
+    t = auth.current_allowed.set(frozenset({"p1"}))
+    try:
+        with pytest.raises(AuthError, match="must name one"):
+            auth.Resolver(TokenStore("/tmp/never-written.enc")).resolve()
+    finally:
+        auth.current_allowed.reset(t)
+
+
+def test_the_existing_single_token_still_grants_everything(monkeypatch):
+    """A deployment that never sets CLIENT_TOKENS must be completely unaffected."""
+    from dentally_mcp import auth
+
+    monkeypatch.setattr(config, "CLIENT_TOKENS", {})
+    monkeypatch.setattr(config, "CLIENT_AUTH_TOKEN", "admin")
+    assert auth.allowed_practices("Bearer admin") == frozenset({"*"})
+    assert auth.verify_client("Bearer admin") is True
+    assert auth.allowed_practices("Bearer nope") is None
+
+
+def test_a_malformed_token_mapping_refuses_to_start(monkeypatch):
+    """Silently degrading to 'no scoping' would grant every client every practice."""
+    monkeypatch.setenv("DENTALLY_MCP_CLIENT_TOKENS", "{not json")
+    with pytest.raises(SystemExit, match="not valid JSON"):
+        config._client_tokens()

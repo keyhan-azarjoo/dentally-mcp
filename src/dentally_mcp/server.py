@@ -129,7 +129,8 @@ def _context_middleware(app):
 
         # The MCP transport itself is gated; /auth/login and /healthz are not, because
         # a practice has to be able to reach the login page before it has a token.
-        if path.startswith("/mcp") and not auth.verify_client(headers.get("authorization")):
+        allowed = auth.allowed_practices(headers.get("authorization"))
+        if path.startswith("/mcp") and allowed is None:
             await _send_401(send)
             return
 
@@ -137,12 +138,14 @@ def _context_middleware(app):
         tok_surface = auth.current_surface.set(
             surfaces.normalise(headers.get("x-dentally-role") or config.DEFAULT_SURFACE))
         tok_caller = auth.current_caller.set(headers.get("x-client-name") or "http")
+        tok_allowed = auth.current_allowed.set(allowed if allowed is not None else frozenset())
         try:
             await app(scope, receive, send)
         finally:
             auth.current_practice.reset(tok_practice)
             auth.current_surface.reset(tok_surface)
             auth.current_caller.reset(tok_caller)
+            auth.current_allowed.reset(tok_allowed)
 
     return middleware
 

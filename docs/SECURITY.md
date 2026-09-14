@@ -110,6 +110,16 @@ just a second copy of the patient database with weaker access control.
 
 ---
 
+### Identifiers are validated before they reach a URL
+
+Tool arguments come from the model, and the model reads text out of patient records,
+so an id is untrusted input. Interpolating one into a path was exploitable two ways,
+both measured against httpx rather than assumed: `9001/../../oauth/token` gets
+**collapsed** by httpx into a request to a different endpoint carrying the practice's
+bearer token, and `1?per_page=999` appends query parameters that walk past the
+pagination caps. Identifiers are now checked against an allow-list of characters
+before interpolation, and the check runs before the request is built.
+
 ### Tool annotations declare what each tool does
 
 All 25 tools carry explicit `readOnlyHint`, `destructiveHint`, `idempotentHint` and
@@ -130,12 +140,22 @@ credential thief. Every interpolation is escaped, and `default-src 'none'` with
 Two things this server does NOT do. Both are deliberate, and both matter if you host
 it for more than one practice.
 
-**The server token is the whole trust boundary between clients.** Any caller holding
-`DENTALLY_MCP_AUTH_TOKEN` may name any connected practice in `X-Dentally-Practice`.
-There is no per-token practice allow-list. So a single shared token across several
-customers means any of them can read all of them. Until that exists: issue one
-deployment per customer, or put your own backend in front and never let a customer's
-client hold the server token directly.
+**The server token grants every practice unless you scope it.**
+`DENTALLY_MCP_AUTH_TOKEN` on its own lets any caller holding it name any connected
+practice in `X-Dentally-Practice`. That is fine for a single practice and a
+cross-practice breach the moment two customers share a deployment.
+
+Use `DENTALLY_MCP_CLIENT_TOKENS` to issue a token per client, scoped to the practices
+it may reach:
+
+```
+DENTALLY_MCP_CLIENT_TOKENS={"tokenA": ["4412"], "tokenB": ["*"]}
+```
+
+A scoped client must name its practice explicitly — falling back to "the only one
+connected" would quietly ignore the restriction. The check runs where the credential
+is chosen, so no tool can route around it. A malformed mapping is a startup failure,
+because silently degrading to "no scoping" would grant everyone everything.
 
 **The role header is not a defence against the client.** `X-Dentally-Role` scopes what
 the *model* can see and invoke, which is its purpose — narrowing the blast radius of a

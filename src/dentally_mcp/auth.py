@@ -32,6 +32,9 @@ from .tokenstore import TokenStore
 current_practice: ContextVar[str | None] = ContextVar("current_practice", default=None)
 current_surface: ContextVar[str] = ContextVar("current_surface", default=config.DEFAULT_SURFACE)
 current_caller: ContextVar[str] = ContextVar("current_caller", default="stdio")
+# Which practices the CALLER may act for. `{"*"}` means unrestricted, which is the
+# default and what a single-practice deployment always gets.
+current_allowed: ContextVar[frozenset[str]] = ContextVar("current_allowed", default=frozenset({"*"}))
 
 
 @dataclass
@@ -50,6 +53,7 @@ class Resolver:
 
     def resolve(self, practice_id: str | None = None) -> Credential:
         practice_id = practice_id or current_practice.get()
+        self._assert_caller_may_reach(practice_id)
 
         if config.DEMO:
             return Credential("demo", "demo-token",
@@ -110,6 +114,27 @@ class Resolver:
         client.scopes = list(cred.scopes)
         return client
 
+    def _assert_caller_may_reach(self, practice_id: str | None) -> None:
+        """Stop a caller naming a practice its token does not cover.
+
+        The practice comes from a request header, so without this the server token
+        alone decides everything and one customer's client can read another's
+        records. Enforced here, at the point the credential is chosen, so no tool can
+        route around it.
+        """
+        allowed = current_allowed.get()
+        if "*" in allowed:
+            return
+        if practice_id is None:
+            # An unscoped caller must say which practice it means; defaulting to
+            # "the only one connected" would quietly ignore the restriction.
+            raise AuthError(
+                "This client is scoped to specific practices and must name one "
+                "via the X-Dentally-Practice header."
+            )
+        if practice_id not in allowed:
+            raise AuthError(f"This client is not authorised for practice {practice_id!r}.")
+
     def _store_ready(self) -> bool:
         return bool(config.TOKEN_STORE_KEY)
 
@@ -122,22 +147,48 @@ class Resolver:
             return []
 
 
+def allowed_practices(authorization: str | None) -> frozenset[str] | None:
+    """Practices this caller may reach, or None if the credential is not valid.
+
+    `{"*"}` means unrestricted. Checked with `compare_digest` against every
+    configured token so the comparison does not leak which one matched via timing.
+    """
+    presented = _bearer(authorization)
+
+    if config.CLIENT_TOKENS:
+        match: frozenset[str] | None = None
+        for token, practices in config.CLIENT_TOKENS.items():
+            # Compare them ALL, even after a hit: returning early would make the
+            # response time depend on the token's position in the mapping.
+            if presented and hmac.compare_digest(presented, token):
+                match = practices
+        if match is not None:
+            return match
+
+    if config.CLIENT_AUTH_TOKEN:
+        if presented and hmac.compare_digest(presented, config.CLIENT_AUTH_TOKEN):
+            return frozenset({"*"})
+        return None
+
+    # No token configured at all: open, and only safe because server.py refuses a
+    # non-loopback bind in that state.
+    return None if config.CLIENT_TOKENS else frozenset({"*"})
+
+
+def _bearer(authorization: str | None) -> str:
+    if not authorization:
+        return ""
+    scheme, _, value = authorization.partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else ""
+
+
 def verify_client(authorization: str | None) -> bool:
     """Check the bearer token OUR clients present on the HTTP transport.
 
     Compared with `hmac.compare_digest` rather than `==` so the check does not leak
     the token a character at a time through response timing.
     """
-    if not config.CLIENT_AUTH_TOKEN:
-        # No token configured. Allowed only for a loopback bind — enforced in server.py,
-        # because "convenient locally" must not silently become "open on the internet".
-        return True
-    if not authorization:
-        return False
-    scheme, _, value = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not value:
-        return False
-    return hmac.compare_digest(value.strip(), config.CLIENT_AUTH_TOKEN)
+    return allowed_practices(authorization) is not None
 
 
 def assert_writes_enabled(action: str) -> None:
