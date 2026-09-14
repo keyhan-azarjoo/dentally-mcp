@@ -8,9 +8,14 @@ the server records it.
 What is deliberately NOT recorded: patient names, the tool's return value, and any
 argument that looks like a credential. An audit log that duplicates the records it
 is auditing is just a second copy of the patient database with weaker access control.
+
+Free-text arguments are stored as a short digest rather than dropped, so the log can
+still answer "the same search ran twice" and "how many distinct patients did this
+session touch" without holding the names themselves.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -23,8 +28,20 @@ from . import config
 log = logging.getLogger("dentally_mcp.audit")
 
 _SENSITIVE_ARG_MARKERS = ("token", "secret", "password", "authorization", "api_key")
-# Arguments worth keeping: identifiers and filters, which is what an investigation
-# actually needs to reconstruct a session.
+
+# Arguments safe to record verbatim: identifiers, dates, and filters — which is what
+# an investigation actually needs to reconstruct a session.
+#
+# This is an ALLOW-list, not a deny-list, and that direction is the point. The old
+# deny-list recorded everything it did not recognise, so `search_patients(query="Jane
+# Doe")` wrote a patient's name into the audit file — while this module's own
+# docstring promised patient names were never recorded. A deny-list also fails open
+# for every argument added in future. Anything not listed here is hashed instead.
+_VERBATIM_ARGS = frozenset({
+    "limit", "page", "per_page", "start_date", "end_date", "start_time", "finish_time",
+    "duration_minutes", "state", "sort_by", "sort_direction", "active_only",
+    "include_inactive", "label", "role", "practice",
+})
 _MAX_ARG_LEN = 120
 
 
@@ -73,9 +90,30 @@ def _safe_args(args: Mapping[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in args.items():
         k = str(key)
-        if any(marker in k.lower() for marker in _SENSITIVE_ARG_MARKERS):
+        low = k.lower()
+
+        if any(marker in low for marker in _SENSITIVE_ARG_MARKERS):
             out[k] = "[redacted]"
             continue
-        text = str(value)
-        out[k] = text if len(text) <= _MAX_ARG_LEN else text[:_MAX_ARG_LEN] + "…"
+
+        # Nothing identifying can hide in a bool, a number, or an absent value.
+        if value is None or isinstance(value, (bool, int, float)):
+            out[k] = value
+            continue
+
+        if low.endswith("_id") or low == "id" or low in _VERBATIM_ARGS:
+            text = str(value)
+            out[k] = text if len(text) <= _MAX_ARG_LEN else text[:_MAX_ARG_LEN] + "…"
+            continue
+
+        # Everything else — search terms, names, notes, contact details — is stored
+        # as a short digest. That still answers "was this the same search, twice?"
+        # and "how many distinct patients did this session touch?", which is what an
+        # investigation needs, without the audit log becoming a second copy of the
+        # patient database under weaker access control.
+        out[k] = _digest(value)
     return out
+
+
+def _digest(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:12]

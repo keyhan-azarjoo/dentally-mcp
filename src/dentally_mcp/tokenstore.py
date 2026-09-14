@@ -107,8 +107,15 @@ class TokenStore:
         blob = self._fernet().encrypt(json.dumps(data).encode())
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_bytes(blob)
-        os.chmod(tmp, 0o600)
+        # Create the file 0600 in one step rather than write-then-chmod. The old
+        # order left a window where the token file existed under the process umask
+        # — commonly 0644 — and anything on the box could read it. Encrypted, but
+        # the ciphertext is still not something to hand out.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, blob)
+        finally:
+            os.close(fd)
         # Atomic replace: a crash mid-write must never leave a half-file that would
         # lock every practice out.
         tmp.replace(self.path)

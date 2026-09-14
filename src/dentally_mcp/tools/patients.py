@@ -8,12 +8,13 @@ from mcp.server.fastmcp import Context
 from .. import redaction
 from ..client import clamp_date_window
 from ..errors import DentallyError, ValidationError
+from ..surfaces import hints
 from ..runtime import confirm, tool, use_client
 
 
 def register(mcp) -> None:
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("search_patients"))
     @tool("search_patients")
     async def search_patients(
         query: str,
@@ -58,7 +59,7 @@ def register(mcp) -> None:
             records = await client.list_all("patients", "patients", limit=limit, **params)
             return redaction.project(records, redaction.patient_summary)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("get_patient"))
     @tool("get_patient")
     async def get_patient(patient_id: str) -> dict[str, Any]:
         """Get one patient's demographic and administrative record.
@@ -76,7 +77,7 @@ def register(mcp) -> None:
             raise DentallyError(f"No patient {patient_id} in Dentally.")
         return redaction.scrub(redaction.patient_summary(patient))
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("get_patient_care_summary"))
     @tool("get_patient_care_summary")
     async def get_patient_care_summary(patient_id: str) -> dict[str, Any]:
         """A patient's upcoming appointments, treatment plans and account balance.
@@ -105,7 +106,7 @@ def register(mcp) -> None:
             "accounts": [redaction.money_summary(a) for a in accounts],
         })
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_treatment_plans"))
     @tool("list_treatment_plans")
     async def list_treatment_plans(patient_id: str, limit: int = 20) -> list[dict[str, Any]]:
         """List a patient's treatment plans: status, total, and how much is outstanding.
@@ -122,7 +123,7 @@ def register(mcp) -> None:
                                      limit=max(1, min(int(limit), 50)), patient_id=patient_id)
         return [redaction.scrub(_plan_summary(p)) for p in plans]
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("register_patient"))
     @tool("register_patient")
     async def register_patient(
         first_name: str,
@@ -163,7 +164,7 @@ def register(mcp) -> None:
         created = body.get("patient") if isinstance(body, dict) else body
         return redaction.scrub(redaction.patient_summary(created or {}))
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("update_patient"))
     @tool("update_patient")
     async def update_patient(
         patient_id: str,

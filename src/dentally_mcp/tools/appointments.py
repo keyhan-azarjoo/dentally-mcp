@@ -8,12 +8,13 @@ from mcp.server.fastmcp import Context
 from .. import redaction
 from ..client import clamp_date_window
 from ..errors import DentallyError, ValidationError
+from ..surfaces import hints
 from ..runtime import confirm, tool, use_client
 
 
 def register(mcp) -> None:
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_appointments"))
     @tool("list_appointments")
     async def list_appointments(
         start_date: str | None = None,
@@ -54,7 +55,7 @@ def register(mcp) -> None:
             )
         return redaction.project(records, redaction.appointment_summary)
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("get_appointment"))
     @tool("get_appointment")
     async def get_appointment(appointment_id: str) -> dict[str, Any]:
         """Get one appointment: time, duration, state, patient and practitioner.
@@ -69,7 +70,7 @@ def register(mcp) -> None:
             raise DentallyError(f"No appointment {appointment_id} in Dentally.")
         return redaction.scrub(redaction.appointment_summary(appt))
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("find_appointment_slots"))
     @tool("find_appointment_slots")
     async def find_appointment_slots(
         start_date: str,
@@ -119,7 +120,7 @@ def register(mcp) -> None:
         ]
         return out[: max(1, min(int(limit), 100))]
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("book_appointment"))
     @tool("book_appointment")
     async def book_appointment(
         patient_id: str,
@@ -166,7 +167,7 @@ def register(mcp) -> None:
         appt = body.get("appointment") if isinstance(body, dict) else body
         return redaction.scrub(redaction.appointment_summary(appt or {}))
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("reschedule_appointment"))
     @tool("reschedule_appointment")
     async def reschedule_appointment(
         appointment_id: str,
@@ -196,7 +197,7 @@ def register(mcp) -> None:
         appt = body.get("appointment") if isinstance(body, dict) else body
         return redaction.scrub(redaction.appointment_summary(appt or {}))
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("cancel_appointment"))
     @tool("cancel_appointment")
     async def cancel_appointment(
         appointment_id: str,
@@ -223,7 +224,7 @@ def register(mcp) -> None:
         appt = body.get("appointment") if isinstance(body, dict) else body
         return redaction.scrub(redaction.appointment_summary(appt or {}))
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_appointment_reasons"))
     @tool("list_appointment_reasons")
     async def list_appointment_reasons() -> list[dict[str, Any]]:
         """List the practice's appointment reasons and their default durations."""
@@ -239,7 +240,7 @@ def register(mcp) -> None:
             for r in records
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("list_cancellation_reasons"))
     @tool("list_cancellation_reasons")
     async def list_cancellation_reasons() -> list[dict[str, Any]]:
         """List the practice's appointment cancellation reasons."""
@@ -248,7 +249,7 @@ def register(mcp) -> None:
                 "appointment_cancellation_reasons", "appointment_cancellation_reasons", limit=100)
         return [{"id": r.get("id"), "name": r.get("name")} for r in records]
 
-    @mcp.tool()
+    @mcp.tool(annotations=hints("diary_utilisation"))
     @tool("diary_utilisation")
     async def diary_utilisation(
         start_date: str | None = None,
