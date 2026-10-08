@@ -1,3 +1,8 @@
+<!-- myotgo-master-index -->
+> **Part of the MyOTGO project.** The project was mothballed on 2026-10-08.
+> **[📍 MASTER_INDEX — every MyOTGO repository, what it does, and where it ran](https://github.com/keyhan-azarjoo/MyOTGO-Project-Docs/blob/development/MASTER_INDEX.md)**
+> Read that first: it is the only complete list, and it records what to do before restarting.
+
 # Dentally MCP
 
 An [MCP](https://modelcontextprotocol.io) server for
